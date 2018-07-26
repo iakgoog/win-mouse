@@ -5,11 +5,12 @@
   "main": "index.js",
   "scripts": {
     "test-node": "test\\run.bat node",
-    "test-iojs": "test\\run.bat iojs"
+    "test-iojs": "test\\run.bat iojs",
+    "build": "./node_modules/.bin/tsc"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kapetan/win-mouse"
+    "url": "git+ssh://git@git.sami.int.thomsonreuters.com:sutthinart.khunvadhana/win-mouse.git"
   },
   "keywords": [
     "track",
@@ -23,14 +24,18 @@
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/kapetan/win-mouse/issues"
+    "url": "https://git.sami.int.thomsonreuters.com/sutthinart.khunvadhana/win-mouse/issues"
   },
-  "homepage": "https://github.com/kapetan/win-mouse",
+  "homepage": "https://git.sami.int.thomsonreuters.com/sutthinart.khunvadhana/win-mouse",
   "dependencies": {
     "bindings": "^1.2.1",
     "nan": "^2.0.9"
   },
   "os": [
     "win32"
-  ]
+  ],
+  "devDependencies": {
+    "@types/node": "^10.5.3",
+    "typescript": "^2.6.2"
+  }
 }
