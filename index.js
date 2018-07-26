@@ -1,41 +1,42 @@
 "use strict";
-var events = require('events');
-var bindings = require('bindings');
-var Mouse = bindings('addon').Mouse;
-module.exports = function () {
-    var that = new events.EventEmitter();
-    var mouse = null;
-    var left = false;
-    var right = false;
-    that.once('newListener', function () {
-        mouse = new Mouse(function (type, x, y) {
+const EventEmitter = require('events');
+const bindings = require('bindings');
+const Mouse = bindings('addon').Mouse;
+class WinMouseEvent extends EventEmitter {
+    constructor() {
+        super();
+        this.left = false;
+        this.right = false;
+        this.initNewListener.bind(this);
+        this.once('newListener', this.initNewListener);
+    }
+    initNewListener() {
+        this.mouse = new Mouse((type, x, y) => {
             if (type === 'left-down')
-                left = true;
+                this.left = true;
             else if (type === 'left-up')
-                left = false;
+                this.left = false;
             else if (type === 'right-down')
-                right = true;
+                this.right = true;
             else if (type === 'right-up')
-                right = false;
-            if (type === 'move' && left)
+                this.right = false;
+            if (type === 'move' && this.left)
                 type = 'left-drag';
-            else if (type === 'move' && right)
+            else if (type === 'move' && this.right)
                 type = 'right-drag';
-            that.emit(type, x, y);
+            this.emit(type, x, y);
         });
-    });
-    that.ref = function () {
-        if (mouse)
-            mouse.ref();
-    };
-    that.unref = function () {
-        if (mouse)
-            mouse.unref();
-    };
-    that.destroy = function () {
-        if (mouse)
-            mouse.destroy();
-        mouse = null;
-    };
-    return that;
-};
+    }
+    ref() {
+        this.mouse && this.mouse.ref();
+    }
+    unref() {
+        this.mouse && this.mouse.unref();
+    }
+    destroy() {
+        this.mouse && this.mouse.destroy();
+        this.mouse = null;
+    }
+}
+const winMouseEvent = new WinMouseEvent();
+module.exports = winMouseEvent;

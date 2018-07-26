@@ -1,39 +1,50 @@
-var events = require('events');
-var bindings = require('bindings');
-var Mouse: any = bindings('addon').Mouse;
+const EventEmitter = require('events');
+const bindings = require('bindings');
+const Mouse: any = bindings('addon').Mouse;
 
-module.exports = function() {
-  var that = new events.EventEmitter();
-  var mouse: any = null;
-  var left = false;
-  var right = false;
+class WinMouseEvent extends EventEmitter {
+  private mouse: any;
+  private left: boolean;
+  private right: boolean;
 
-  that.once('newListener', function() {
-    mouse = new Mouse(function(type: string, x: number, y: number) {
-      if(type === 'left-down') left = true;
-      else if(type === 'left-up') left = false;
-      else if(type === 'right-down') right = true;
-      else if(type === 'right-up') right = false;
+  constructor() {
+    super();
+    this.left = false;
+    this.right = false;
 
-      if(type === 'move' && left) type = 'left-drag';
-      else if(type === 'move' && right) type = 'right-drag';
+    this.initNewListener.bind(this);
+    
+    this.once('newListener', this.initNewListener);
+  }
 
-      that.emit(type, x, y);
+  initNewListener() {
+    this.mouse = new Mouse((type: string, x: number, y: number) => {
+      if(type === 'left-down') this.left = true;
+      else if(type === 'left-up') this.left = false;
+      else if(type === 'right-down') this.right = true;
+      else if(type === 'right-up') this.right = false;
+
+      if(type === 'move' && this.left) type = 'left-drag';
+      else if(type === 'move' && this.right) type = 'right-drag';
+
+      this.emit(type, x, y);
     });
-  });
+  }
 
-  that.ref = function() {
-    if(mouse) mouse.ref();
-  };
+  ref() {
+    this.mouse && this.mouse.ref();
+  }
 
-  that.unref = function() {
-    if(mouse) mouse.unref();
-  };
+  unref() {
+    this.mouse && this.mouse.unref();
+  }
 
-  that.destroy = function() {
-    if(mouse) mouse.destroy();
-    mouse = null;
-  };
+  destroy() {
+    this.mouse && this.mouse.destroy();
+    this.mouse = null;
+  }
+}
 
-  return that;
-};
+const winMouseEvent = new WinMouseEvent();
+
+module.exports = winMouseEvent;
