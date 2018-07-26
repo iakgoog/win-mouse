@@ -1,4 +1,4 @@
-# win-mouse 
+# win-mouse (typescript version)
 
 [![Build status](https://ci.appveyor.com/api/projects/status/wj9wy01q1ufhmfns?svg=true)](https://ci.appveyor.com/project/kapetan/win-mouse)
 
