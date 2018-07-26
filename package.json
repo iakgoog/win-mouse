@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@git.sami.int.thomsonreuters.com:sutthinart.khunvadhana/win-mouse.git"
+    "url": "git+https://github.com/kapetan/win-mouse.git"
   },
   "keywords": [
     "track",
@@ -24,9 +24,9 @@
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://git.sami.int.thomsonreuters.com/sutthinart.khunvadhana/win-mouse/issues"
+    "url": "https://github.com/kapetan/win-mouse.git/issues"
   },
-  "homepage": "https://git.sami.int.thomsonreuters.com/sutthinart.khunvadhana/win-mouse",
+  "homepage": "https://github.com/kapetan/win-mouse.git",
   "dependencies": {
     "bindings": "^1.2.1",
     "nan": "^2.0.9"
