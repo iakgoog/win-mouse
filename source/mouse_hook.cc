@@ -1,6 +1,11 @@
 #include <stdexcept>
 #include "mouse_hook.h"
 
+HHOOK callWndHook = NULL;
+HHOOK lowLevelMouseHook = NULL;
+
+HINSTANCE dllInstance = NULL;
+
 void RunThread(void* arg) {
 	MouseHookManager* mouse = (MouseHookManager*) arg;
 	mouse->_Run();
@@ -15,6 +20,21 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
 	}
 
 	return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
+LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
+	CWPSTRUCT* msg = (CWPSTRUCT*)lParam;
+    
+  switch(msg->message) {
+    case WM_INITMENUPOPUP:
+      MouseHookManager::GetInstance()->_HandlePause(true);
+      break;
+    case WM_EXITMENULOOP:
+      MouseHookManager::GetInstance()->_HandlePause(false);
+      break;
+  }
+
+  return CallNextHookEx(callWndHook, code, wParam, lParam);
 }
 
 MouseHookRef MouseHookRegister(MouseHookCallback callback, void* data) {
@@ -32,7 +52,9 @@ MouseHookManager* MouseHookManager::GetInstance() {
 
 MouseHookManager::MouseHookManager() {
 	running = false;
+	pause = false;
 	thread_id = NULL;
+
 	listeners = new std::list<MouseHookRef>();
 	uv_mutex_init(&event_lock);
 	uv_mutex_init(&init_lock);
@@ -78,13 +100,19 @@ void MouseHookManager::Unregister(MouseHookRef ref) {
 }
 
 void MouseHookManager::_HandleEvent(WPARAM type, POINT point) {
-	uv_mutex_lock(&event_lock);
+	if (!pause) {
+		uv_mutex_lock(&event_lock);
 
-	for(std::list<MouseHookRef>::iterator it = listeners->begin(); it != listeners->end(); it++) {
-		(*it)->callback(type, point, (*it)->data);
+		for(std::list<MouseHookRef>::iterator it = listeners->begin(); it != listeners->end(); it++) {
+			(*it)->callback(type, point, (*it)->data);
+		}
+
+		uv_mutex_unlock(&event_lock);
 	}
+}
 
-	uv_mutex_unlock(&event_lock);
+void MouseHookManager::_HandlePause(bool value) {
+	pause = value;
 }
 
 void MouseHookManager::_Run() {
@@ -95,18 +123,20 @@ void MouseHookManager::_Run() {
 
 	PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
 	thread_id = GetCurrentThreadId();
-	
+
 	uv_cond_signal(&init_cond);
 	uv_mutex_unlock(&init_lock);
 
-	HHOOK hook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
+	callWndHook = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, dllInstance, 0);
+	lowLevelMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
 
-	while((val = GetMessage(&msg, NULL, 0, 0)) != 0) {
+	while((val = GetMessage(&msg, NULL, 0, 0)) != 0)  {
 		if(val == -1) throw std::runtime_error("GetMessage failed (return value -1)");
 		if(msg.message == WM_STOP_MESSAGE_LOOP) break;
 	}
 
-	UnhookWindowsHookEx(hook);
+	UnhookWindowsHookEx(callWndHook);
+	UnhookWindowsHookEx(lowLevelMouseHook);
 
 	uv_mutex_lock(&init_lock);
 	thread_id = NULL;
@@ -123,4 +153,9 @@ void MouseHookManager::Stop() {
 
 	PostThreadMessage(id, WM_STOP_MESSAGE_LOOP, NULL, NULL);
 	uv_thread_join(&thread);
+}
+
+BOOL APIENTRY DllMain(HMODULE module, DWORD reasonForCall, LPVOID reserved) {
+	dllInstance = (HINSTANCE)module;
+	return TRUE;
 }
