@@ -17,6 +17,11 @@ static HANDLE CBTThread;
 LRESULT CALLBACK LowLevelMouseProc(int, WPARAM, LPARAM);
 LRESULT CALLBACK CBTProc (int, WPARAM, LPARAM);
 
+void RunThread(void* arg) {
+	MouseHookManager* mouse = (MouseHookManager*) arg;
+	mouse->_Run();
+}
+
 MouseHookRef MouseHookRegister(MouseHookCallback callback, void* data) {
 	return MouseHookManager::GetInstance()->Register(callback, data);
 }
@@ -50,30 +55,6 @@ MouseHookManager::~MouseHookManager() {
 	uv_cond_destroy(&init_cond);
 }
 
-DWORD WINAPI MouseAsync(LPVOID lpParam) {
-	lowLevelMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
-	if (lowLevelMouseHook == NULL) {
-		return false;
-	}
-	MSG ThreadMsg;
-	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
-
-	};
-	return true;
-}
-
-DWORD WINAPI CBTAsync(LPVOID lpParam) {
-	CBTHook = SetWindowsHookEx(WH_CBT, CBTProc, dllInstance, 0);
-	if (CBTHook == NULL) {
-		return false;
-	}
-	MSG ThreadMsg;
-	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
-
-	};
-	return true;
-}
-
 MouseHookRef MouseHookManager::Register(MouseHookCallback callback, void* data) {
 	uv_mutex_lock(&event_lock);
 	
@@ -86,11 +67,7 @@ MouseHookRef MouseHookManager::Register(MouseHookCallback callback, void* data) 
 
 	uv_mutex_unlock(&event_lock);	
 
-	if(empty) {
-		MouseThread = CreateThread(NULL, 0, MouseAsync, NULL, 0, NULL);
-	}
-
-  CBTThread = CreateThread(NULL, 0, CBTAsync, NULL, 0, NULL);
+  if(empty) uv_thread_create(&thread, RunThread, this);
 
 	return entry;
 }
@@ -119,18 +96,40 @@ void MouseHookManager::_HandleEvent(WPARAM type, POINT point) {
 	}
 }
 
+void MouseHookManager::_Run() {
+  MSG msg;
+	BOOL val;
+
+	uv_mutex_lock(&init_lock);
+
+	PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
+	thread_id = GetCurrentThreadId();
+	
+	uv_cond_signal(&init_cond);
+	uv_mutex_unlock(&init_lock);
+
+	lowLevelMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
+  CBTHook = SetWindowsHookEx(WH_CBT, CBTProc, dllInstance, 0);
+
+	while((val = GetMessage(&msg, NULL, 0, 0)) != 0) {
+		if(val == -1) throw std::runtime_error("GetMessage failed (return value -1)");
+		if(msg.message == WM_STOP_MESSAGE_LOOP) break;
+	}
+
+	UnhookWindowsHookEx(lowLevelMouseHook);
+  UnhookWindowsHookEx(CBTHook);
+
+	uv_mutex_lock(&init_lock);
+	thread_id = NULL;
+	uv_mutex_unlock(&init_lock);
+}
+
 void MouseHookManager::_HandlePause(bool value) {
 	pause = value;
 }
 
 void MouseHookManager::Stop() {
 	uv_mutex_lock(&init_lock);
-
-	UnhookWindowsHookEx(lowLevelMouseHook);
-  UnhookWindowsHookEx(CBTHook);
-
-  TerminateThread(MouseThread, 0);
-  TerminateThread(CBTThread, 0);
 
 	while(thread_id == NULL) uv_cond_wait(&init_cond, &init_lock);
 	DWORD id = thread_id;
