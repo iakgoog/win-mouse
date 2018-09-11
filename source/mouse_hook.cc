@@ -6,18 +6,15 @@
 
 using namespace std;
 
-HHOOK callWndHook = NULL;
 HHOOK lowLevelMouseHook = NULL;
 HHOOK CBTHook = NULL;
 
 HINSTANCE dllInstance = NULL;
 
-static HANDLE WindowThread;
 static HANDLE MouseThread;
 static HANDLE CBTThread;
 
 LRESULT CALLBACK LowLevelMouseProc(int, WPARAM, LPARAM);
-LRESULT CALLBACK CallWndProc(int, WPARAM, LPARAM);
 LRESULT CALLBACK CBTProc (int, WPARAM, LPARAM);
 
 MouseHookRef MouseHookRegister(MouseHookCallback callback, void* data) {
@@ -51,18 +48,6 @@ MouseHookManager::~MouseHookManager() {
 	uv_mutex_destroy(&event_lock);
 	uv_mutex_destroy(&init_lock);
 	uv_cond_destroy(&init_cond);
-}
-
-DWORD WINAPI WindowAsync(LPVOID lpParam) {
-	callWndHook = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, dllInstance, 0);
-	if (callWndHook == NULL) {
-		return false;
-	}
-	MSG ThreadMsg;
-	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
-
-	};
-	return true;
 }
 
 DWORD WINAPI MouseAsync(LPVOID lpParam) {
@@ -141,10 +126,10 @@ void MouseHookManager::_HandlePause(bool value) {
 void MouseHookManager::Stop() {
 	uv_mutex_lock(&init_lock);
 
-	UnhookWindowsHookEx(callWndHook);
+	UnhookWindowsHookEx(lowLevelMouseHook);
   UnhookWindowsHookEx(CBTHook);
 
-  TerminateThread(WindowThread, 0);
+  TerminateThread(MouseThread, 0);
   TerminateThread(CBTThread, 0);
 
 	while(thread_id == NULL) uv_cond_wait(&init_cond, &init_lock);
@@ -170,21 +155,6 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
 	}
 
 	return CallNextHookEx(lowLevelMouseHook, nCode, wParam, lParam);
-}
-
-LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
-	CWPSTRUCT* msg = (CWPSTRUCT*)lParam;
-	// cout << "CallWndProc msg: " << msg->message << endl;
-	switch(msg->message) {
-		case WM_INITMENUPOPUP:
-			MouseHookManager::GetInstance()->_HandlePause(true);
-			break;
-		case WM_EXITMENULOOP:
-			MouseHookManager::GetInstance()->_HandlePause(false);
-			break;
-	}
-
-	return CallNextHookEx(callWndHook, code, wParam, lParam);
 }
 
 LRESULT CALLBACK CBTProc(int code, WPARAM wParam, LPARAM lParam) {
