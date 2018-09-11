@@ -1,21 +1,24 @@
 #include <stdexcept>
 #include "mouse_hook.h"
+#include <iostream>  
+#include <stdlib.h>  
+#include <string> 
 
-void RunThread(void* arg) {
-	MouseHookManager* mouse = (MouseHookManager*) arg;
-	mouse->_Run();
-}
+using namespace std;
 
-LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
-	if(nCode >= 0) {
-		MSLLHOOKSTRUCT* data = (MSLLHOOKSTRUCT*) lParam;
-		POINT point = data->pt;
+HHOOK callWndHook = NULL;
+HHOOK lowLevelMouseHook = NULL;
+HHOOK CBTHook = NULL;
 
-		MouseHookManager::GetInstance()->_HandleEvent(wParam, point);
-	}
+HINSTANCE dllInstance = NULL;
 
-	return CallNextHookEx(NULL, nCode, wParam, lParam);
-}
+static HANDLE WindowThread;
+static HANDLE MouseThread;
+static HANDLE CBTThread;
+
+LRESULT CALLBACK LowLevelMouseProc(int, WPARAM, LPARAM);
+LRESULT CALLBACK CallWndProc(int, WPARAM, LPARAM);
+LRESULT CALLBACK CBTProc (int, WPARAM, LPARAM);
 
 MouseHookRef MouseHookRegister(MouseHookCallback callback, void* data) {
 	return MouseHookManager::GetInstance()->Register(callback, data);
@@ -32,7 +35,9 @@ MouseHookManager* MouseHookManager::GetInstance() {
 
 MouseHookManager::MouseHookManager() {
 	running = false;
+	pause = false;
 	thread_id = NULL;
+
 	listeners = new std::list<MouseHookRef>();
 	uv_mutex_init(&event_lock);
 	uv_mutex_init(&init_lock);
@@ -48,6 +53,42 @@ MouseHookManager::~MouseHookManager() {
 	uv_cond_destroy(&init_cond);
 }
 
+DWORD WINAPI WindowAsync(LPVOID lpParam) {
+	callWndHook = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, dllInstance, 0);
+	if (callWndHook == NULL) {
+		return false;
+	}
+	MSG ThreadMsg;
+	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
+
+	};
+	return true;
+}
+
+DWORD WINAPI MouseAsync(LPVOID lpParam) {
+	lowLevelMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
+	if (lowLevelMouseHook == NULL) {
+		return false;
+	}
+	MSG ThreadMsg;
+	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
+
+	};
+	return true;
+}
+
+DWORD WINAPI CBTAsync(LPVOID lpParam) {
+	CBTHook = SetWindowsHookEx(WH_CBT, CBTProc, dllInstance, 0);
+	if (CBTHook == NULL) {
+		return false;
+	}
+	MSG ThreadMsg;
+	while (GetMessage(&ThreadMsg, NULL, 0, 0)) {
+
+	};
+	return true;
+}
+
 MouseHookRef MouseHookManager::Register(MouseHookCallback callback, void* data) {
 	uv_mutex_lock(&event_lock);
 	
@@ -58,9 +99,13 @@ MouseHookRef MouseHookManager::Register(MouseHookCallback callback, void* data) 
 	entry->data = data;
 	listeners->push_back(entry);
 
-	uv_mutex_unlock(&event_lock);
-	
-	if(empty) uv_thread_create(&thread, RunThread, this);
+	uv_mutex_unlock(&event_lock);	
+
+	if(empty) {
+		MouseThread = CreateThread(NULL, 0, MouseAsync, NULL, 0, NULL);
+	}
+
+  CBTThread = CreateThread(NULL, 0, CBTAsync, NULL, 0, NULL);
 
 	return entry;
 }
@@ -78,43 +123,29 @@ void MouseHookManager::Unregister(MouseHookRef ref) {
 }
 
 void MouseHookManager::_HandleEvent(WPARAM type, POINT point) {
-	uv_mutex_lock(&event_lock);
+	if (!pause) {
+		uv_mutex_lock(&event_lock);
 
-	for(std::list<MouseHookRef>::iterator it = listeners->begin(); it != listeners->end(); it++) {
-		(*it)->callback(type, point, (*it)->data);
+		for(std::list<MouseHookRef>::iterator it = listeners->begin(); it != listeners->end(); it++) {
+			(*it)->callback(type, point, (*it)->data);
+		}
+
+		uv_mutex_unlock(&event_lock);
 	}
-
-	uv_mutex_unlock(&event_lock);
 }
 
-void MouseHookManager::_Run() {
-	MSG msg;
-	BOOL val;
-
-	uv_mutex_lock(&init_lock);
-
-	PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
-	thread_id = GetCurrentThreadId();
-	
-	uv_cond_signal(&init_cond);
-	uv_mutex_unlock(&init_lock);
-
-	HHOOK hook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, (HINSTANCE) NULL, 0);
-
-	while((val = GetMessage(&msg, NULL, 0, 0)) != 0) {
-		if(val == -1) throw std::runtime_error("GetMessage failed (return value -1)");
-		if(msg.message == WM_STOP_MESSAGE_LOOP) break;
-	}
-
-	UnhookWindowsHookEx(hook);
-
-	uv_mutex_lock(&init_lock);
-	thread_id = NULL;
-	uv_mutex_unlock(&init_lock);
+void MouseHookManager::_HandlePause(bool value) {
+	pause = value;
 }
 
 void MouseHookManager::Stop() {
 	uv_mutex_lock(&init_lock);
+
+	UnhookWindowsHookEx(callWndHook);
+  UnhookWindowsHookEx(CBTHook);
+
+  TerminateThread(WindowThread, 0);
+  TerminateThread(CBTThread, 0);
 
 	while(thread_id == NULL) uv_cond_wait(&init_cond, &init_lock);
 	DWORD id = thread_id;
@@ -123,4 +154,57 @@ void MouseHookManager::Stop() {
 
 	PostThreadMessage(id, WM_STOP_MESSAGE_LOOP, NULL, NULL);
 	uv_thread_join(&thread);
+}
+
+BOOL APIENTRY DllMain(HMODULE module, DWORD reasonForCall, LPVOID reserved) {
+	dllInstance = (HINSTANCE)module;
+	return TRUE;
+}
+
+LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
+	if(nCode >= 0) {
+		MSLLHOOKSTRUCT* data = (MSLLHOOKSTRUCT*) lParam;
+		POINT point = data->pt;
+
+		MouseHookManager::GetInstance()->_HandleEvent(wParam, point);
+	}
+
+	return CallNextHookEx(lowLevelMouseHook, nCode, wParam, lParam);
+}
+
+LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
+	CWPSTRUCT* msg = (CWPSTRUCT*)lParam;
+	// cout << "CallWndProc msg: " << msg->message << endl;
+	switch(msg->message) {
+		case WM_INITMENUPOPUP:
+			MouseHookManager::GetInstance()->_HandlePause(true);
+			break;
+		case WM_EXITMENULOOP:
+			MouseHookManager::GetInstance()->_HandlePause(false);
+			break;
+	}
+
+	return CallNextHookEx(callWndHook, code, wParam, lParam);
+}
+
+LRESULT CALLBACK CBTProc(int code, WPARAM wParam, LPARAM lParam) {
+  if(code == HCBT_CREATEWND) {
+    HWND hwnd = (HWND)wParam;
+    CHAR name[1024] = {0};
+    GetClassName(hwnd, name, sizeof(name));
+    string className(name);
+    // cout << ">> window class: " << className << endl;
+    if(className == "#32768") { // The class for a menu.
+      MouseHookManager::GetInstance()->_HandlePause(true);
+    }
+  } else if(code == HCBT_DESTROYWND) {
+    HWND hwnd = (HWND)wParam;
+    CHAR name[1024] = {0};
+    GetClassName(hwnd, name, sizeof(name));
+    string className(name);
+    if(className == "#32768") {
+      MouseHookManager::GetInstance()->_HandlePause(false);
+    }
+  }
+	return CallNextHookEx(CBTHook, code, wParam, lParam);
 }

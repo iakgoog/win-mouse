@@ -1,6 +1,8 @@
 #ifndef _MOUSE_HOOK_H
 #define _MOUSE_HOOK_H
 
+#define WIN32_LEAN_AND_MEAN 
+
 #include <uv.h>
 #include <node.h>
 #include <Windows.h>
@@ -29,9 +31,11 @@ class MouseHookManager {
 
 		void _Run();
 		void _HandleEvent(WPARAM, POINT);
+    void _HandlePause(bool);
 
 	private:
 		bool running;
+    bool pause;
 		DWORD thread_id;
 		std::list<MouseHookRef>* listeners;
 		uv_mutex_t event_lock;
